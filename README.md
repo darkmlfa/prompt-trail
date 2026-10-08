@@ -28,6 +28,27 @@ claude plugin marketplace add ~/.claude/plugin-sources/prompt-trail
 claude plugin install prompt-trail@prompt-trail --scope user
 ```
 
+CLI로 설치할 수도 있습니다.
+
+```bash
+claude plugin marketplace add darkmlfa/prompt-trail
+claude plugin install prompt-trail@prompt-trail --scope user
+```
+
+설치한 뒤, 이미 열려 있는 세션에서는 다음을 입력하면 바로 로드됩니다.
+
+```
+/reload-plugins
+```
+
+## 업데이트
+
+```bash
+claude plugin update prompt-trail@prompt-trail
+```
+
+그다음 세션에서 `/reload-plugins`를 입력합니다. 업데이트는 `.claude-plugin/plugin.json`의 `version`으로 새 버전인지 판단하므로, 배포할 때는 버전을 올려서 push 해야 합니다(예: `0.1.0` → `0.1.1`).
+
 ## 요구사항
 
 - Claude Code 2.1.294 이상
