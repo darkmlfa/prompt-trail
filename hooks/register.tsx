@@ -26,9 +26,34 @@ let geometry: { size: number; total: number; visible: number } | undefined
 // True while a summary call is out: one at a time.
 let inFlight = false
 
+// Ticks left to fill an empty box from the transcript after a start or a
+// resume: the resumed transcript may load after the event that announced it.
+const BACKFILL_TRIES = 5
+let backfillTries = 0
+
+// Fills an empty box with the transcript's prompts; true once there is nothing
+// left to do (the box has entries, or now holds the transcript's).
+async function backfill($: EngineInterface): Promise<boolean> {
+  if ((await read($, entriesAtom)).length > 0) return true
+  const found = backfillFromMessages(await $.session.messages(), BACKFILL_LIMIT)
+  if (found.length === 0) return false
+  await update($, entriesAtom, list => list.length > 0 ? list : found.map((item, i): Entry => ({
+    id: crypto.randomUUID(), n: i + 1, text: item.text, context: item.context, status: 'pending', attempts: 0,
+  })))
+  return true
+}
+
 // Summarizes the newest pending entry. The answer is written to that entry by
 // id, so an entry cleared while the call was out stays gone.
 async function tick($: EngineInterface): Promise<void> {
+  if (backfillTries > 0) {
+    backfillTries--
+    try {
+      if (await backfill($)) backfillTries = 0
+    } catch {
+      // Tried again on the next tick while tries remain.
+    }
+  }
   if (inFlight) return
   const entry = (await read($, entriesAtom)).findLast(item => item.status === 'pending')
   if (!entry) return
@@ -88,17 +113,11 @@ export const register: Register = on => {
   // the list kept) and starts the summary timer, which a reload starts again.
   on('session.start', async ($, e, next) => {
     const result = await next(e)
+    backfillTries = BACKFILL_TRIES
     try {
-      if ((await read($, entriesAtom)).length === 0) {
-        const found = backfillFromMessages(await $.session.messages(), BACKFILL_LIMIT)
-        if (found.length > 0) {
-          await update($, entriesAtom, list => list.length > 0 ? list : found.map((item, i): Entry => ({
-            id: crypto.randomUUID(), n: i + 1, text: item.text, context: item.context, status: 'pending', attempts: 0,
-          })))
-        }
-      }
+      if (await backfill($)) backfillTries = 0
     } catch {
-      // The box starts empty and fills from the next prompt.
+      // The timer tries again.
     }
     $.clock.every(TICK_MS, () => void tick($))
     return result
@@ -107,6 +126,9 @@ export const register: Register = on => {
   // A /clear or a resume starts another conversation: the box starts over.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' || e.reason === 'resume') {
+      // A resume brings another conversation's prompts to fill in; a /clear
+      // starts an empty one, which must not be refilled from the old.
+      backfillTries = e.reason === 'resume' ? BACKFILL_TRIES : 0
       try {
         await update($, entriesAtom, () => [])
         await update($, offsetAtom, () => 0)

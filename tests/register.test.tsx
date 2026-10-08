@@ -404,3 +404,41 @@ test('a narrow band keeps the toggle and drops the arrows', async ($, on) => {
   expect(await ui.find({ type: 'Button', key: 'up' })).toBeUndefined()
   expect(await ui.find({ type: 'Button', key: 'toggle' })).toBeDefined()
 })
+
+const RESUMED: SessionMessage[] = [
+  { role: 'user', text: '이전 요청', toolUses: [] }, { role: 'assistant', text: '답', toolUses: [] },
+  { role: 'user', text: '이전 둘째 요청', toolUses: [] },
+]
+
+test('an in-process resume fills the box from the resumed transcript', async ($, on) => {
+  const clock = mock.clock(on); weather(on); passPrompts(on); haiku(on, [], () => clock.sleep(60000))
+  const transcript: SessionMessage[] = []
+  session(on, transcript)
+  await $.session.start(START)
+  await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
+  transcript.push(...RESUMED)
+  await clock.advance(1000)
+  const t = await texts(await mountBand($))
+  expect(t.filter(x => /^. \d  /.test(x))).toEqual(['⏳ 1  이전 요청', '⏳ 2  이전 둘째 요청'])
+})
+
+test('a transcript that loads after the start is still filled in', async ($, on) => {
+  const clock = mock.clock(on); weather(on); passPrompts(on); haiku(on, [], () => clock.sleep(60000))
+  const transcript: SessionMessage[] = []
+  session(on, transcript)
+  await $.session.start(START)
+  transcript.push(...RESUMED)
+  await clock.advance(1000)
+  expect((await texts(await mountBand($))).some(x => x.endsWith('이전 둘째 요청'))).toBe(true)
+})
+
+test('after /clear the old conversation is not filled back in', async ($, on) => {
+  const clock = mock.clock(on); weather(on); passPrompts(on); haiku(on, [], () => clock.sleep(60000))
+  const transcript: SessionMessage[] = []
+  session(on, transcript)
+  await $.session.start(START)
+  transcript.push(...RESUMED)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  await clock.advance(3000)
+  expect(await texts(await mountBand($))).toEqual(['WEATHER'])
+})
