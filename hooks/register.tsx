@@ -71,4 +71,18 @@ export const register: Register = on => {
       </Box>
     )
   })
+
+  // The wheel over the box, or a scroll key while the band holds the focus,
+  // moves the box's own window; the line beneath stays where it is.
+  on('ui.scroll', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const box = geometry
+    if (!box || box.total <= box.size) return next(e)
+    if (e.pointer && (e.pointer.row < 0 || e.pointer.row > box.visible + 1)) return next(e)
+    const last = maxOffset(box.total, box.size)
+    const current = (await read($, followAtom)) ? last : Math.min(await read($, offsetAtom), last)
+    const offset = Math.min(Math.max(0, current + e.by), last)
+    await update($, offsetAtom, () => offset)
+    await update($, followAtom, () => offset === last)
+    return {}
+  })
 }

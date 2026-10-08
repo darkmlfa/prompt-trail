@@ -1,4 +1,6 @@
+import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 import { mountBand, passPrompts, PROPS, submit, texts, weather } from './helpers'
 
@@ -87,4 +89,78 @@ test('the engine drawing beneath takes no row', async ($, on) => {
   expect((await texts(ui)).filter(x => x === '│ ').length).toBe(5)
   const drawn = await ui.drawn()
   expect(drawn.type === 'Box' && drawn.children?.at(-1)).toEqual({ type: 'engine', ref: 0 })
+})
+
+function passScroll(on: On) {
+  const passed: number[] = []
+  on('ui.scroll', ($, e) => {
+    passed.push(e.by)
+    return {}
+  })
+  return passed
+}
+
+const wheel = ($: Engine, by: number, row: number | undefined = 1) => $.ui.scroll({
+  component: 'AbovePrompt', requestId: 'band', offset: 0, by, bodyRows: 20, contentRows: 13,
+  origin: { kind: 'person' }, ...(row === undefined ? {} : { pointer: { column: 5, row } }),
+})
+
+test('the wheel over the box moves its window and the counts follow', async ($, on) => {
+  weather(on); passPrompts(on); passScroll(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  const ui = await mountBand($)
+  await wheel($, -1)
+  let t = await texts(ui)
+  expect(t[0]!.endsWith(' ↑1 ─╮')).toBe(true)
+  expect(t.at(-2)!.endsWith(' ↓1 ─╯')).toBe(true)
+  await wheel($, -5)
+  t = await texts(ui)
+  expect(t[0]).toBe('╭─ 이번 세션 프롬프트 (6) ───────────────────────╮')
+  expect(t.at(-2)!.endsWith(' ↓2 ─╯')).toBe(true)
+})
+
+test('the wheel past the end stays at the end', async ($, on) => {
+  weather(on); passPrompts(on); passScroll(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  const ui = await mountBand($)
+  await wheel($, 9)
+  const t = await texts(ui)
+  expect(t[0]!.endsWith(' ↑2 ─╮')).toBe(true)
+  expect(t.at(-2)).toBe('╰────────────────────────────────────────────────╯')
+})
+
+test('a new prompt jumps back to the bottom', async ($, on) => {
+  weather(on); passPrompts(on); passScroll(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  const ui = await mountBand($)
+  await wheel($, -2)
+  await submit($, 'p7')
+  const t = await texts(ui)
+  expect(t[0]).toBe('╭─ 이번 세션 프롬프트 (7) ────────────────── ↑4 ─╮')
+  expect(t.at(-2)).toBe('╰────────────────────────────────────────────────╯')
+})
+
+test('the wheel over the line beneath goes to the engine', async ($, on) => {
+  weather(on); passPrompts(on); const passed = passScroll(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  await mountBand($)
+  await wheel($, -1, 12)
+  expect(passed).toEqual([-1])
+})
+
+test('nothing to scroll goes to the engine', async ($, on) => {
+  weather(on); passPrompts(on); const passed = passScroll(on)
+  await submit($, 'p1')
+  await mountBand($)
+  await wheel($, -1)
+  expect(passed).toEqual([-1])
+})
+
+test('a scroll key with no pointer moves the box too', async ($, on) => {
+  weather(on); passPrompts(on); const passed = passScroll(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  const ui = await mountBand($)
+  await wheel($, -1, undefined)
+  expect(passed).toEqual([])
+  expect((await texts(ui))[0]!.endsWith(' ↑1 ─╮')).toBe(true)
 })
