@@ -1,5 +1,5 @@
-import type { On } from 'claude-code'
-import { expect, test } from 'claude-code/testing'
+import type { ModelCompleteInput, On, SessionMessage } from 'claude-code'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { mountBand, passPrompts, PROPS, submit, texts, weather } from './helpers'
@@ -163,4 +163,121 @@ test('a scroll key with no pointer moves the box too', async ($, on) => {
   await wheel($, -1, undefined)
   expect(passed).toEqual([])
   expect((await texts(ui))[0]!.endsWith(' ↑1 ─╮')).toBe(true)
+})
+
+const USAGE = { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+const START = { cwd: '/', surface: 'terminal', isInteractive: true } as const
+
+function session(on: On, messages: SessionMessage[] = []) {
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('session.messages', () => ({ value: messages }))
+}
+
+function haiku(on: On, replies: string[], wait?: () => Promise<void>) {
+  const calls: ModelCompleteInput[] = []
+  on('model.complete', async ($, e) => {
+    calls.push(e)
+    if (wait) await wait()
+    return { value: { isAnswered: true, text: replies[calls.length - 1] ?? 'nope', usage: USAGE } }
+  })
+  return calls
+}
+
+test('a pending entry gets its emoji and summary from Haiku', async ($, on) => {
+  const clock = mock.clock(on); weather(on); passPrompts(on); session(on)
+  const calls = haiku(on, ['{"emoji":"🐛","summary":"로그인 버그 수정 요청"}'])
+  await $.session.start(START)
+  await submit($, '로그인 버그 고쳐줘')
+  await clock.advance(1000)
+  const t = await texts(await mountBand($))
+  expect(t).toContain('🐛 1  로그인 버그 고쳐줘')
+  expect(t).toContain('      → 로그인 버그 수정 요청')
+  expect(calls[0]!.model).toBe('haiku')
+})
+
+test('one call at a time, newest first', async ($, on) => {
+  const clock = mock.clock(on); weather(on); passPrompts(on); session(on)
+  const calls = haiku(on, ['{"emoji":"🐛","summary":"둘째"}', '{"emoji":"🎨","summary":"첫째"}'], () => clock.sleep(5000))
+  await $.session.start(START)
+  await submit($, '첫 프롬프트'); await submit($, '둘째 프롬프트')
+  await clock.advance(1000); await clock.advance(1000)
+  expect(calls.length).toBe(1)
+  expect(calls[0]!.prompt).toContain('둘째 프롬프트')
+  await clock.advance(5000); await clock.advance(1000)
+  expect(calls.length).toBe(2)
+  expect(calls[1]!.prompt).toContain('첫 프롬프트')
+})
+
+test('a reply that is no summary is tried twice, then the rest of the prompt shows', async ($, on) => {
+  const clock = mock.clock(on); weather(on); passPrompts(on); session(on)
+  const calls = haiku(on, ['nope', 'nope'])
+  await $.session.start(START)
+  await submit($, '높이도 제한을 둬서 텍스트 10줄이 최대고 그거보다 길면 스크롤로 움직이도록 해야함')
+  await clock.advance(1000); await clock.advance(1000); await clock.advance(1000)
+  expect(calls.length).toBe(2)
+  const t = await texts(await mountBand($))
+  expect(t.some(x => x.startsWith('💬 1  높이도'))).toBe(true)
+  expect(t.some(x => x.trim().startsWith('→'))).toBe(false)
+})
+
+test('an empty reply from the API counts as an attempt', async ($, on) => {
+  const clock = mock.clock(on); weather(on); passPrompts(on); session(on)
+  let n = 0
+  on('model.complete', () => {
+    n++
+    return { value: { isAnswered: false, reason: 'empty-reply', usage: USAGE } }
+  })
+  await $.session.start(START)
+  await submit($, 'p1')
+  await clock.advance(1000); await clock.advance(1000); await clock.advance(1000)
+  expect(n).toBe(2)
+})
+
+test('the context sent is the assistant text before the prompt', async ($, on) => {
+  const clock = mock.clock(on); weather(on); passPrompts(on)
+  session(on, [{ role: 'user', text: '첫', toolUses: [] }, { role: 'assistant', text: 'B안으로 갈까요?', toolUses: [] }, { role: 'user', text: '진행해', toolUses: [] }])
+  const calls = haiku(on, ['{"emoji":"✅","summary":"B안 승인"}'])
+  await $.session.start(START)
+  await submit($, '진행해')
+  await clock.advance(1000)
+  expect(calls.at(-1)!.prompt).toContain('B안으로 갈까요?')
+})
+
+test('prompts from before the mod loaded are filled in at start, once', async ($, on) => {
+  mock.clock(on); weather(on); passPrompts(on)
+  session(on, [{ role: 'user', text: '첫 요청', toolUses: [] }, { role: 'assistant', text: '답', toolUses: [] },
+    { role: 'user', text: '<command-name>/x</command-name>', toolUses: [] }, { role: 'user', text: '둘째 요청', toolUses: [] }])
+  await $.session.start(START)
+  await $.session.start(START)
+  const t = await texts(await mountBand($))
+  expect(t.filter(x => /^⏳ \d  /.test(x))).toEqual(['⏳ 1  첫 요청', '⏳ 2  둘째 요청'])
+})
+
+test('/clear empties the box', async ($, on) => {
+  weather(on); passPrompts(on); session(on)
+  await submit($, 'p1')
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  expect(await texts(await mountBand($))).toEqual(['WEATHER'])
+})
+
+test('a reply arriving after /clear does not bring the entry back', async ($, on) => {
+  const clock = mock.clock(on); weather(on); passPrompts(on); session(on)
+  haiku(on, ['{"emoji":"🐛","summary":"늦은 답"}'], () => clock.sleep(5000))
+  await $.session.start(START)
+  await submit($, 'p1')
+  await clock.advance(1000)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  await clock.advance(5000)
+  expect(await texts(await mountBand($))).toEqual(['WEATHER'])
+})
+
+test('after /clear the wheel goes back to the engine', async ($, on) => {
+  weather(on); passPrompts(on); session(on); const passed = passScroll(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  const ui = await mountBand($)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  expect(await texts(ui)).toEqual(['WEATHER'])
+  await wheel($, -1)
+  expect(passed).toEqual([-1])
 })

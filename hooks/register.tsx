@@ -1,9 +1,14 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { Entry } from '../types'
-import { shouldCapture } from './capture'
+import { BACKFILL_LIMIT, backfillFromMessages, contextBefore, shouldCapture } from './capture'
 import { BORDER_COLOR, bodySize, bottomBorder, entryRows, maxOffset, topBorder, windowRows } from './layout'
+import { buildRequest, parseReply, SUMMARY_MODEL } from './summarize'
+import type { Parsed } from './summarize'
+
+const TICK_MS = 1000
+const MAX_ATTEMPTS = 2
 
 const entriesAtom = atom({ plugin: 'prompt-trail', key: 'entries' } as const, [] as Entry[])
 const offsetAtom = atom({ plugin: 'prompt-trail', key: 'offset' } as const, 0)
@@ -13,7 +18,74 @@ const followAtom = atom({ plugin: 'prompt-trail', key: 'follow' } as const, true
 // rows in all, and the rows on screen.
 let geometry: { size: number; total: number; visible: number } | undefined
 
+// True while a summary call is out: one at a time.
+let inFlight = false
+
+// Summarizes the newest pending entry. The answer is written to that entry by
+// id, so an entry cleared while the call was out stays gone.
+async function tick($: EngineInterface): Promise<void> {
+  if (inFlight) return
+  const entry = (await read($, entriesAtom)).findLast(item => item.status === 'pending')
+  if (!entry) return
+  inFlight = true
+  try {
+    let context = entry.context
+    let parsed: Parsed | null = null
+    try {
+      context ??= contextBefore(await $.session.messages(), entry.text)
+      const result = await $.model.complete({
+        model: SUMMARY_MODEL, ...buildRequest(entry.text, context), maxTokens: 300, timeoutMs: 20000,
+      })
+      parsed = result.isAnswered ? parseReply(result.text) : null
+    } catch {
+      parsed = null
+    }
+    await update($, entriesAtom, list => list.map((item): Entry => {
+      if (item.id !== entry.id) return item
+      if (parsed) return { ...item, context, status: 'done', emoji: parsed.emoji, summary: parsed.summary }
+      const attempts = item.attempts + 1
+      return { ...item, context, attempts, status: attempts >= MAX_ATTEMPTS ? 'failed' : 'pending' }
+    }))
+  } finally {
+    inFlight = false
+  }
+}
+
 export const register: Register = on => {
+  // Fills in the prompts typed before the mod loaded (once: a reload finds
+  // the list kept) and starts the summary timer, which a reload starts again.
+  on('session.start', async ($, e, next) => {
+    const result = await next(e)
+    try {
+      if ((await read($, entriesAtom)).length === 0) {
+        const found = backfillFromMessages(await $.session.messages(), BACKFILL_LIMIT)
+        if (found.length > 0) {
+          await update($, entriesAtom, list => list.length > 0 ? list : found.map((item, i): Entry => ({
+            id: crypto.randomUUID(), n: i + 1, text: item.text, context: item.context, status: 'pending', attempts: 0,
+          })))
+        }
+      }
+    } catch {
+      // The box starts empty and fills from the next prompt.
+    }
+    $.clock.every(TICK_MS, () => void tick($))
+    return result
+  })
+
+  // A /clear or a resume starts another conversation: the box starts over.
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear' || e.reason === 'resume') {
+      try {
+        await update($, entriesAtom, () => [])
+        await update($, offsetAtom, () => 0)
+        await update($, followAtom, () => true)
+      } catch {
+        // Nothing to undo.
+      }
+    }
+    return next(e)
+  })
+
   // Lists the prompt before it goes on, so the box shows it at once; takes it
   // back off when a hook beneath drops it. Never holds the prompt up.
   on('prompt.submit', async ($, e, next) => {
@@ -41,6 +113,7 @@ export const register: Register = on => {
 
   // The box above whatever the plugins beneath drew (token-weather's line).
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    geometry = undefined // set again below only when the box is drawn
     if (e.surface !== 'terminal' || e.props.hasSurvey) return next(e)
     const below = await next(e)
     const entries = await read($, entriesAtom)
