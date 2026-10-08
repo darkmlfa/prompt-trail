@@ -1,0 +1,7 @@
+{
+  "name": "prompt-trail",
+  "version": "0.1.0",
+  "description": "이번 세션 프롬프트를 token-weather 위 박스에 원문 첫 줄과 Haiku 요약으로 보여준다",
+  "author": { "name": "darkmlfa" },
+  "types": "./types/index.d.ts"
+}
