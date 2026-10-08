@@ -3,7 +3,11 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Entry } from '../types'
 import { BACKFILL_LIMIT, backfillFromMessages, contextBefore, shouldCapture } from './capture'
-import { BORDER_COLOR, bodySize, bottomBorder, entryRows, maxOffset, topBorder, windowRows } from './layout'
+import {
+  BORDER_COLOR, bodySize, bottomBorder, bottomBorderParts, entryRows, maxOffset, TOGGLE_COLLAPSE, TOGGLE_EXPAND, topBorder,
+  windowRows,
+} from './layout'
+import type { BodyWindow } from './layout'
 import { buildRequest, parseReply, SUMMARY_MODEL } from './summarize'
 import type { Parsed } from './summarize'
 
@@ -13,6 +17,7 @@ const MAX_ATTEMPTS = 2
 const entriesAtom = atom({ plugin: 'prompt-trail', key: 'entries' } as const, [] as Entry[])
 const offsetAtom = atom({ plugin: 'prompt-trail', key: 'offset' } as const, 0)
 const followAtom = atom({ plugin: 'prompt-trail', key: 'follow' } as const, true)
+const expandedAtom = atom({ plugin: 'prompt-trail', key: 'expanded' } as const, false)
 
 // The box as last drawn, for the scroll hook: the body rows it may show, its
 // rows in all, and the rows on screen.
@@ -51,6 +56,21 @@ async function tick($: EngineInterface): Promise<void> {
   }
 }
 
+// Folds or unfolds the box. Unfolded, it shows from its end, the newest prompt;
+// folded again, its own window follows the newest.
+async function toggle($: EngineInterface, band: string): Promise<void> {
+  const expanded = await update($, expandedAtom, value => !value)
+  if (!expanded) {
+    await update($, followAtom, () => true)
+    return
+  }
+  try {
+    await $.ui.scroll({ in: band, to: 'end' })
+  } catch {
+    // The band shows from its top instead.
+  }
+}
+
 export const register: Register = on => {
   // Fills in the prompts typed before the mod loaded (once: a reload finds
   // the list kept) and starts the summary timer, which a reload starts again.
@@ -79,6 +99,7 @@ export const register: Register = on => {
         await update($, entriesAtom, () => [])
         await update($, offsetAtom, () => 0)
         await update($, followAtom, () => true)
+        await update($, expandedAtom, () => false)
       } catch {
         // Nothing to undo.
       }
@@ -113,7 +134,7 @@ export const register: Register = on => {
 
   // The box above whatever the plugins beneath drew (token-weather's line).
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    geometry = undefined // set again below only when the box is drawn
+    geometry = undefined // set again below only when the folded box is drawn
     if (e.surface !== 'terminal' || e.props.hasSurvey) return next(e)
     const below = await next(e)
     const entries = await read($, entriesAtom)
@@ -123,10 +144,22 @@ export const register: Register = on => {
     const cells = e.props.bodyColumns
     const numberWidth = String(entries.at(-1)?.n ?? 1).length
     const rows = entries.flatMap(entry => entryRows(entry, numberWidth, cells - 4))
-    const offset = (await read($, followAtom)) ? maxOffset(rows.length, size) : await read($, offsetAtom)
-    const win = windowRows(rows, offset, size)
-    geometry = { size, total: rows.length, visible: win.rows.length }
-    const { Box, Text } = $.ui.resolve(e)
+    // Unfolded, every row is drawn and the engine scrolls the band under the
+    // wheel (it only does for a tree taller than the band); folded, the box
+    // keeps its own window of at most MAX_BODY_ROWS rows.
+    const expanded = await read($, expandedAtom)
+    let win: BodyWindow
+    if (expanded) {
+      win = { offset: 0, rows, above: 0, below: 0 }
+    } else {
+      const offset = (await read($, followAtom)) ? maxOffset(rows.length, size) : await read($, offsetAtom)
+      win = windowRows(rows, offset, size)
+      geometry = { size, total: rows.length, visible: win.rows.length }
+    }
+    const label = expanded ? TOGGLE_COLLAPSE : TOGGLE_EXPAND
+    const parts = bottomBorderParts(win.below, cells, label)
+    const band = e.requestId
+    const { Box, Button, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
         <Text color={BORDER_COLOR}>{topBorder(`이번 세션 프롬프트 (${entries.length})`, win.above, cells)}</Text>
@@ -139,7 +172,15 @@ export const register: Register = on => {
             <Text color={BORDER_COLOR}> │</Text>
           </Box>
         ))}
-        <Text color={BORDER_COLOR}>{bottomBorder(win.below, cells)}</Text>
+        {parts ? (
+          <Box flexDirection="row" width={cells}>
+            <Text color={BORDER_COLOR}>{parts[0]}</Text>
+            <Button key="toggle" label={label} plain onPress={() => toggle($, band)} />
+            <Text color={BORDER_COLOR}>{parts[1]}</Text>
+          </Box>
+        ) : (
+          <Text color={BORDER_COLOR}>{bottomBorder(win.below, cells)}</Text>
+        )}
         {below}
       </Box>
     )

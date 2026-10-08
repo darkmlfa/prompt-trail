@@ -168,3 +168,16 @@ export function bottomBorder(below: number, cells: number): string {
   const fill = cells - 1 - cellWidth(tail)
   return fill < 0 ? `╰${'─'.repeat(cells - 2)}╯` : `╰${'─'.repeat(fill)}${tail}`
 }
+
+export const TOGGLE_EXPAND = '[펼치기 ▾]'
+export const TOGGLE_COLLAPSE = '[접기 ▴]'
+
+// The bottom border split around a toggle drawn between its two parts, so the
+// three are exactly `cells` wide; null when the band is too narrow for it.
+export function bottomBorderParts(below: number, cells: number, label: string): [left: string, right: string] | null {
+  const tail = below > 0 ? ` ↓${below} ─ ` : ' '
+  const right = ' ─╯'
+  const fill = cells - 1 - cellWidth(tail) - cellWidth(label) - cellWidth(right)
+  if (fill < 0) return null
+  return [`╰${'─'.repeat(fill)}${tail}`, right]
+}

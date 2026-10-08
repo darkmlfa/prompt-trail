@@ -33,3 +33,17 @@ export async function texts(ui: { findAll: (query: ElementQuery) => Promise<Foun
 export async function submit($: Engine, text: string, kind = 'composer'): Promise<void> {
   await $.prompt.submit({ text, origin: { kind } as PromptOrigin, wait: false })
 }
+
+// The band as drawn, one string per screen line: each child of the root Box
+// with its Texts and Button labels joined (a row's border pieces included).
+export async function lines(ui: { drawn: () => Promise<unknown> }): Promise<string[]> {
+  const textOf = (node: unknown): string => {
+    if (typeof node === 'string') return node
+    if (!node || typeof node !== 'object') return ''
+    const element = node as { type?: string; props?: { label?: unknown }; children?: unknown[] }
+    if (element.type === 'Button') return String(element.props?.label ?? '')
+    return (element.children ?? []).map(textOf).join('')
+  }
+  const root = (await ui.drawn()) as { type?: string; children?: unknown[] }
+  return root.type === 'Box' ? (root.children ?? []).map(textOf) : [textOf(root)]
+}

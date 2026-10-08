@@ -13,6 +13,6 @@ export type Entry = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'prompt-trail': { entries: Entry[]; offset: number; follow: boolean }
+    'prompt-trail': { entries: Entry[]; offset: number; follow: boolean; expanded: boolean }
   }
 }

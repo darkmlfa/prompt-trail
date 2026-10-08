@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  bodySize, bottomBorder, cellWidth, cutToWidth, entryRows, flatten, maxOffset, splitAtWidth, topBorder, windowRows,
+  bodySize, bottomBorder, bottomBorderParts, cellWidth, cutToWidth, entryRows, flatten, maxOffset, splitAtWidth, topBorder, windowRows,
   wrapToRows,
 } from '../hooks/layout'
 
@@ -110,4 +110,12 @@ test('borders survive a narrow band', () => {
   expect(topBorder('t', 1, 2)).toBe('╭╮')
   expect(topBorder('t', 1, 1)).toBe('')
   expect(bottomBorder(3, 4)).toBe('╰──╯')
+})
+
+test('the bottom border makes room for the toggle', () => {
+  expect(bottomBorderParts(0, 50, '[펼치기 ▾]')).toEqual([`╰${'─'.repeat(35)} `, ' ─╯'])
+  expect(bottomBorderParts(2, 50, '[펼치기 ▾]')).toEqual([`╰${'─'.repeat(30)} ↓2 ─ `, ' ─╯'])
+  const [left, right] = bottomBorderParts(2, 50, '[펼치기 ▾]')!
+  expect(cellWidth(`${left}[펼치기 ▾]${right}`)).toBe(50)
+  expect(bottomBorderParts(0, 12, '[펼치기 ▾]')).toBeNull()
 })

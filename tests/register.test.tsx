@@ -2,7 +2,7 @@ import type { ModelCompleteInput, On, SessionMessage } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { mountBand, passPrompts, PROPS, submit, texts, weather } from './helpers'
+import { lines, mountBand, passPrompts, PROPS, submit, texts, weather } from './helpers'
 
 test('with no prompts the band shows only what is beneath', async ($, on) => {
   weather(on)
@@ -17,9 +17,17 @@ test('a typed prompt appears in a box above the line beneath', async ($, on) => 
     '╭─ 이번 세션 프롬프트 (1) ───────────────────────╮',
     '│ ', '⏳ 1  로그인 버그 고쳐줘', ' │',
     '│ ', '      → 요약 중…', ' │',
-    '╰────────────────────────────────────────────────╯',
+    `╰${'─'.repeat(35)} `, ' ─╯',
     'WEATHER',
   ])
+})
+
+test('the bottom border carries the expand toggle', async ($, on) => {
+  weather(on); passPrompts(on)
+  await submit($, '로그인 버그 고쳐줘')
+  const ui = await mountBand($)
+  expect((await lines(ui)).at(-2)).toBe(`╰${'─'.repeat(35)} [펼치기 ▾] ─╯`)
+  expect((await ui.find({ type: 'Button', key: 'toggle' }))?.props).toMatchObject({ label: '[펼치기 ▾]' })
 })
 
 test('rows take the entry color and the first row is bold', async ($, on) => {
@@ -52,7 +60,7 @@ test('twelve rows show as ten with the hidden count on top', async ($, on) => {
   const t = await texts(await mountBand($))
   expect(t[0]).toBe('╭─ 이번 세션 프롬프트 (6) ────────────────── ↑2 ─╮')
   expect(t.filter(x => x === '│ ').length).toBe(10)
-  expect(t.at(-2)).toBe('╰────────────────────────────────────────────────╯')
+  expect(t.at(-3)).toBe(`╰${'─'.repeat(35)} `)
 })
 
 test('a survey keeps the band to itself', async ($, on) => {
@@ -110,13 +118,13 @@ test('the wheel over the box moves its window and the counts follow', async ($, 
   for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
   const ui = await mountBand($)
   await wheel($, -1)
-  let t = await texts(ui)
-  expect(t[0]!.endsWith(' ↑1 ─╮')).toBe(true)
-  expect(t.at(-2)!.endsWith(' ↓1 ─╯')).toBe(true)
+  let l = await lines(ui)
+  expect(l[0]!.endsWith(' ↑1 ─╮')).toBe(true)
+  expect(l.at(-2)!.endsWith(' ↓1 ─ [펼치기 ▾] ─╯')).toBe(true)
   await wheel($, -5)
-  t = await texts(ui)
-  expect(t[0]).toBe('╭─ 이번 세션 프롬프트 (6) ───────────────────────╮')
-  expect(t.at(-2)!.endsWith(' ↓2 ─╯')).toBe(true)
+  l = await lines(ui)
+  expect(l[0]).toBe('╭─ 이번 세션 프롬프트 (6) ───────────────────────╮')
+  expect(l.at(-2)!.endsWith(' ↓2 ─ [펼치기 ▾] ─╯')).toBe(true)
 })
 
 test('the wheel past the end stays at the end', async ($, on) => {
@@ -124,9 +132,9 @@ test('the wheel past the end stays at the end', async ($, on) => {
   for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
   const ui = await mountBand($)
   await wheel($, 9)
-  const t = await texts(ui)
-  expect(t[0]!.endsWith(' ↑2 ─╮')).toBe(true)
-  expect(t.at(-2)).toBe('╰────────────────────────────────────────────────╯')
+  const l = await lines(ui)
+  expect(l[0]!.endsWith(' ↑2 ─╮')).toBe(true)
+  expect(l.at(-2)).toBe(`╰${'─'.repeat(35)} [펼치기 ▾] ─╯`)
 })
 
 test('a new prompt jumps back to the bottom', async ($, on) => {
@@ -135,9 +143,9 @@ test('a new prompt jumps back to the bottom', async ($, on) => {
   const ui = await mountBand($)
   await wheel($, -2)
   await submit($, 'p7')
-  const t = await texts(ui)
-  expect(t[0]).toBe('╭─ 이번 세션 프롬프트 (7) ────────────────── ↑4 ─╮')
-  expect(t.at(-2)).toBe('╰────────────────────────────────────────────────╯')
+  const l = await lines(ui)
+  expect(l[0]).toBe('╭─ 이번 세션 프롬프트 (7) ────────────────── ↑4 ─╮')
+  expect(l.at(-2)).toBe(`╰${'─'.repeat(35)} [펼치기 ▾] ─╯`)
 })
 
 test('the wheel over the line beneath goes to the engine', async ($, on) => {
@@ -280,4 +288,47 @@ test('after /clear the wheel goes back to the engine', async ($, on) => {
   expect(await texts(ui)).toEqual(['WEATHER'])
   await wheel($, -1)
   expect(passed).toEqual([-1])
+})
+
+test('the toggle draws every row and leaves the wheel to the engine', async ($, on) => {
+  weather(on); passPrompts(on); const passed = passScroll(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  const ui = await mountBand($)
+  await ui.press({ key: 'toggle' })
+  const l = await lines(ui)
+  expect(l[0]).toBe('╭─ 이번 세션 프롬프트 (6) ───────────────────────╮')
+  expect(l.filter(x => x.startsWith('│ ')).length).toBe(12)
+  expect(l.at(-2)).toBe(`╰${'─'.repeat(37)} [접기 ▴] ─╯`)
+  await wheel($, -1)
+  expect(passed.at(-1)).toBe(-1)
+})
+
+test('collapsing returns to ten rows that follow the newest', async ($, on) => {
+  weather(on); passPrompts(on); passScroll(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  const ui = await mountBand($)
+  await ui.press({ key: 'toggle' })
+  await ui.press({ key: 'toggle' })
+  const l = await lines(ui)
+  expect(l[0]!.endsWith(' ↑2 ─╮')).toBe(true)
+  expect(l.filter(x => x.startsWith('│ ')).length).toBe(10)
+  expect(l.at(-2)).toBe(`╰${'─'.repeat(35)} [펼치기 ▾] ─╯`)
+})
+
+test('a narrow band keeps a plain bottom border', async ($, on) => {
+  weather(on); passPrompts(on)
+  await submit($, 'p1')
+  const ui = await mountBand($, { ...PROPS, bodyColumns: 14 })
+  expect(await ui.find({ type: 'Button', key: 'toggle' })).toBeUndefined()
+  expect((await lines(ui)).at(-2)).toBe(`╰${'─'.repeat(12)}╯`)
+})
+
+test('/clear folds the box back', async ($, on) => {
+  weather(on); passPrompts(on); session(on); passScroll(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  const ui = await mountBand($)
+  await ui.press({ key: 'toggle' })
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  await submit($, 'p1')
+  expect((await lines(ui)).at(-2)).toBe(`╰${'─'.repeat(35)} [펼치기 ▾] ─╯`)
 })
