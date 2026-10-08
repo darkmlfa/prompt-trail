@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Entry } from '../types'
-import { BACKFILL_LIMIT, backfillFromMessages, contextBefore, shouldCapture } from './capture'
+import { BACKFILL_LIMIT, backfillFromMessages, contextBefore, latestReply, shouldCapture } from './capture'
 import {
   BORDER_COLOR, bodySize, bottomBorder, bottomBorderParts, entryRows, maxOffset, TOGGLE_COLLAPSE, TOGGLE_EXPAND, topBorder,
   windowRows,
@@ -113,8 +113,16 @@ export const register: Register = on => {
     if (!shouldCapture(e.text, e.origin.kind)) return next(e)
     const id = crypto.randomUUID()
     try {
+      // The context is read now, while the reply this prompt answers is the
+      // newest one; the summary timer reads the transcript only when this fails.
+      let context: string | undefined
+      try {
+        context = latestReply(await $.session.messages())
+      } catch {
+        context = undefined
+      }
       await update($, entriesAtom, list => {
-        const entry: Entry = { id, n: (list.at(-1)?.n ?? 0) + 1, text: e.text, status: 'pending', attempts: 0 }
+        const entry: Entry = { id, n: (list.at(-1)?.n ?? 0) + 1, text: e.text, context, status: 'pending', attempts: 0 }
         return [...list, entry]
       })
       await update($, followAtom, () => true)
@@ -189,6 +197,7 @@ export const register: Register = on => {
   // The wheel over the box, or a scroll key while the band holds the focus,
   // moves the box's own window; the line beneath stays where it is.
   on('ui.scroll', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.origin.kind !== 'person') return next(e)
     const box = geometry
     if (!box || box.total <= box.size) return next(e)
     if (e.pointer && (e.pointer.row < 0 || e.pointer.row > box.visible + 1)) return next(e)

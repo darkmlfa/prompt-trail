@@ -63,6 +63,12 @@ export function contextBefore(messages: readonly SessionMessage[], text: string)
   return tail(assistantTextBefore(messages, at), CONTEXT_CHARS)
 }
 
+// The tail of the newest Claude text in the transcript: read as a prompt is
+// typed, it is the reply that prompt answers.
+export function latestReply(messages: readonly SessionMessage[]): string {
+  return tail(assistantTextBefore(messages, messages.length), CONTEXT_CHARS)
+}
+
 export function backfillFromMessages(messages: readonly SessionMessage[], limit: number): Backfill[] {
   const found: Backfill[] = []
   let lastAssistant = ''

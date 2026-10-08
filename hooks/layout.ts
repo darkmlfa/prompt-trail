@@ -79,9 +79,12 @@ function splitWord(word: string, cells: number): [head: string, rest: string] {
 // into the last row, cut with an ellipsis.
 export function wrapToRows(s: string, cells: number, maxRows: number): string[] {
   if (!s || cells <= 0 || maxRows <= 0) return []
+  // More than maxRows rows' worth of text: enough to fill them and fold the
+  // rest, and it keeps a long paste from costing a wrap of the whole text.
+  const bounded = splitAtWidth(s, (cells + 1) * (maxRows + 1))[0]
   const rows: string[] = []
   let current = ''
-  for (let word of s.split(' ')) {
+  for (let word of bounded.split(' ')) {
     while (cellWidth(word) > cells) {
       if (current) {
         rows.push(current)

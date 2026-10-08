@@ -119,3 +119,10 @@ test('the bottom border makes room for the toggle', () => {
   expect(cellWidth(`${left}[펼치기 ▾]${right}`)).toBe(50)
   expect(bottomBorderParts(0, 12, '[펼치기 ▾]')).toBeNull()
 })
+
+test('a long prompt with no spaces wraps in bounded time', () => {
+  const started = Date.now()
+  const rows = entryRows({ id: 'a', n: 1, text: 'x'.repeat(50000), status: 'failed', attempts: 2 }, 1, 46)
+  expect(Date.now() - started).toBeLessThan(500)
+  expect(rows.length).toBe(3)
+})

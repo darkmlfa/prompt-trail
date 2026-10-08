@@ -332,3 +332,29 @@ test('/clear folds the box back', async ($, on) => {
   await submit($, 'p1')
   expect((await lines(ui)).at(-2)).toBe(`╰${'─'.repeat(35)} [펼치기 ▾] ─╯`)
 })
+
+test('the context is the Claude reply on screen when the prompt was typed', async ($, on) => {
+  const clock = mock.clock(on); weather(on); passPrompts(on)
+  const transcript: SessionMessage[] = [{ role: 'assistant', text: 'A안과 B안 중 무엇으로 갈까요?', toolUses: [] }]
+  session(on, transcript)
+  const calls = haiku(on, ['{"emoji":"✅","summary":"B안 선택"}'])
+  await $.session.start(START)
+  await submit($, '진행해')
+  // Before the summary runs, Claude starts answering and the stored row differs from what was typed.
+  transcript.push({ role: 'user', text: '진행해\n(첨부된 맥락)', toolUses: [] },
+    { role: 'assistant', text: '좋습니다, B안으로 진행하겠습니다.', toolUses: [] })
+  await clock.advance(1000)
+  expect(calls[0]!.prompt).toContain('A안과 B안 중 무엇으로 갈까요?')
+  expect(calls[0]!.prompt).not.toContain('B안으로 진행하겠습니다')
+})
+
+test("another plugin's scroll of the band goes to the engine", async ($, on) => {
+  weather(on); passPrompts(on); const passed = passScroll(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  await mountBand($)
+  await $.ui.scroll({
+    component: 'AbovePrompt', requestId: 'band', offset: 0, by: 5, bodyRows: 20, contentRows: 13,
+    origin: { kind: 'plugin', name: 'other' },
+  })
+  expect(passed).toEqual([5])
+})
