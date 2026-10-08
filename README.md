@@ -1,6 +1,6 @@
 # prompt-trail
 
-Claude Code mod입니다. 입력창 바로 위 band에, 이번 세션에 입력한 프롬프트를 테두리 박스로 보여줍니다. 프롬프트마다 색과 이모지, 원문 첫 줄, Haiku 요약(최대 2줄)을 표시합니다. 박스 안은 최대 10줄이고, 넘치면 휠로 스크롤합니다.
+Claude Code mod입니다. 입력창 바로 위 band에, 이번 세션에 입력한 프롬프트를 테두리 박스로 보여줍니다. 프롬프트마다 색과 이모지, 원문 첫 줄, Haiku 요약(최대 2줄)을 표시합니다. 박스 안은 최대 10줄이고, 넘치면 `[▲]` `[▼]` 버튼이나 PageUp/PageDown으로 스크롤합니다.
 
 ```
 ╭─ 이번 세션 프롬프트 (12) ───────────────── ↑4 ─╮
@@ -77,3 +77,13 @@ claude plugin test .
 ```
 
 설계는 `docs/2026-10-08-prompt-trail-design.md`, 구현 계획은 `docs/2026-10-08-prompt-trail-plan.md`에 있습니다.
+
+## English
+
+prompt-trail is a Claude Code mod that shows the prompts you typed this session in a bordered box in the band right above the prompt input. Each prompt gets its own color, an emoji, its first line, and a Haiku summary of up to two lines (Haiku is called once per prompt, with the previous Claude reply as context).
+
+- **Install:** `/plugin install prompt-trail --marketplace darkmlfa/prompt-trail`, or `claude plugin marketplace add darkmlfa/prompt-trail` then `claude plugin install prompt-trail@prompt-trail --scope user`. Run `/reload-plugins` in an open session.
+- **Update:** `claude plugin update prompt-trail@prompt-trail`, then `/reload-plugins`.
+- **Scrolling:** the box shows up to 10 rows. Use the `[▲]` `[▼]` buttons on the bottom border, or focus the box (click it or `ctrl+x` `tab`) and use PageUp/PageDown and Home/End. `[펼치기 ▾]` expands the full list, `[접기 ▴]` folds it back. The mouse wheel does not reach the box: Claude Code only sends wheel input to the band when its content is taller than the band.
+- **Prompts listed:** typed prompts (including ones sent mid-turn) and Remote Control prompts; slash commands, notifications and other sessions' messages are left out. Earlier prompts are filled in when the mod loads or a session is resumed, and `/clear` empties the box.
+- **Limitations:** terminal only (fullscreen recommended); it cannot be shown together with token-weather, which takes the same band first, so disable one of them.
