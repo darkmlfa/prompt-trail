@@ -174,13 +174,27 @@ export function bottomBorder(below: number, cells: number): string {
 
 export const TOGGLE_EXPAND = '[펼치기 ▾]'
 export const TOGGLE_COLLAPSE = '[접기 ▴]'
+export const ARROW_UP = '[▲]'
+export const ARROW_DOWN = '[▼]'
+export const SCROLL_STEP = 3
 
-// The bottom border split around a toggle drawn between its two parts, so the
-// three are exactly `cells` wide; null when the band is too narrow for it.
-export function bottomBorderParts(below: number, cells: number, label: string): [left: string, right: string] | null {
+// The bottom border split around `middleCells` cells drawn between its two
+// parts (buttons), so the whole is exactly `cells` wide; null when the band is
+// too narrow for them.
+export function bottomBorderParts(below: number, cells: number, middleCells: number): [left: string, right: string] | null {
   const tail = below > 0 ? ` ↓${below} ─ ` : ' '
   const right = ' ─╯'
-  const fill = cells - 1 - cellWidth(tail) - cellWidth(label) - cellWidth(right)
+  const fill = cells - 1 - cellWidth(tail) - middleCells - cellWidth(right)
   if (fill < 0) return null
   return [`╰${'─'.repeat(fill)}${tail}`, right]
+}
+
+// How far a scroll key moves the folded box: a page key (the band's own page,
+// `bodyRows`) moves one box page, Home and End (the tree's height,
+// `contentRows`) go to an end, anything else by what it asked.
+export function scrollStep(by: number, bodyRows: number, contentRows: number, size: number, total: number): number {
+  const sign = Math.sign(by)
+  if (contentRows !== bodyRows && Math.abs(by) === contentRows) return sign * total
+  if (Math.abs(by) >= bodyRows) return sign * size
+  return by
 }

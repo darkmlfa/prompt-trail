@@ -1,8 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  bodySize, bottomBorder, bottomBorderParts, cellWidth, cutToWidth, entryRows, flatten, maxOffset, splitAtWidth, topBorder, windowRows,
-  wrapToRows,
+  bodySize, bottomBorder, bottomBorderParts, cellWidth, cutToWidth, entryRows, flatten, maxOffset, scrollStep, splitAtWidth, topBorder,
+  windowRows, wrapToRows,
 } from '../hooks/layout'
 
 test('cellWidth counts Hangul and emoji as two cells', () => {
@@ -112,12 +112,22 @@ test('borders survive a narrow band', () => {
   expect(bottomBorder(3, 4)).toBe('╰──╯')
 })
 
-test('the bottom border makes room for the toggle', () => {
-  expect(bottomBorderParts(0, 50, '[펼치기 ▾]')).toEqual([`╰${'─'.repeat(35)} `, ' ─╯'])
-  expect(bottomBorderParts(2, 50, '[펼치기 ▾]')).toEqual([`╰${'─'.repeat(30)} ↓2 ─ `, ' ─╯'])
-  const [left, right] = bottomBorderParts(2, 50, '[펼치기 ▾]')!
+test('the bottom border makes room for what is drawn in it', () => {
+  expect(bottomBorderParts(0, 50, 10)).toEqual([`╰${'─'.repeat(35)} `, ' ─╯'])
+  expect(bottomBorderParts(2, 50, 10)).toEqual([`╰${'─'.repeat(30)} ↓2 ─ `, ' ─╯'])
+  expect(bottomBorderParts(2, 50, 20)).toEqual([`╰${'─'.repeat(20)} ↓2 ─ `, ' ─╯'])
+  const [left, right] = bottomBorderParts(2, 50, 10)!
   expect(cellWidth(`${left}[펼치기 ▾]${right}`)).toBe(50)
-  expect(bottomBorderParts(0, 12, '[펼치기 ▾]')).toBeNull()
+  expect(bottomBorderParts(0, 12, 10)).toBeNull()
+})
+
+test('scroll keys move the folded box by its own page', () => {
+  // A page key comes as the band's page (bodyRows), Home and End as the tree's height (contentRows).
+  expect(scrollStep(-35, 35, 12, 10, 24)).toBe(-10)
+  expect(scrollStep(35, 35, 12, 10, 24)).toBe(10)
+  expect(scrollStep(-12, 35, 12, 10, 24)).toBe(-24)
+  expect(scrollStep(12, 35, 12, 10, 24)).toBe(24)
+  expect(scrollStep(-1, 35, 12, 10, 24)).toBe(-1)
 })
 
 test('a long prompt with no spaces wraps in bounded time', () => {

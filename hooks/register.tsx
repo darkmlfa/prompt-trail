@@ -4,8 +4,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Entry } from '../types'
 import { BACKFILL_LIMIT, backfillFromMessages, contextBefore, latestReply, shouldCapture } from './capture'
 import {
-  BORDER_COLOR, bodySize, bottomBorder, bottomBorderParts, entryRows, maxOffset, TOGGLE_COLLAPSE, TOGGLE_EXPAND, topBorder,
-  windowRows,
+  ARROW_DOWN, ARROW_UP, BORDER_COLOR, bodySize, bottomBorder, bottomBorderParts, cellWidth, entryRows, maxOffset, SCROLL_STEP,
+  scrollStep, TOGGLE_COLLAPSE, TOGGLE_EXPAND, topBorder, windowRows,
 } from './layout'
 import type { BodyWindow } from './layout'
 import { buildRequest, parseReply, SUMMARY_MODEL } from './summarize'
@@ -54,6 +54,18 @@ async function tick($: EngineInterface): Promise<void> {
   } finally {
     inFlight = false
   }
+}
+
+// Moves the folded box's own window by `delta` rows; at the bottom it follows
+// the newest again.
+async function moveBox($: EngineInterface, delta: number): Promise<void> {
+  const box = geometry
+  if (!box || box.total <= box.size) return
+  const last = maxOffset(box.total, box.size)
+  const current = (await read($, followAtom)) ? last : Math.min(await read($, offsetAtom), last)
+  const offset = Math.min(Math.max(0, current + delta), last)
+  await update($, offsetAtom, () => offset)
+  await update($, followAtom, () => offset === last)
 }
 
 // Folds or unfolds the box. Unfolded, it shows from its end, the newest prompt;
@@ -165,7 +177,13 @@ export const register: Register = on => {
       geometry = { size, total: rows.length, visible: win.rows.length }
     }
     const label = expanded ? TOGGLE_COLLAPSE : TOGGLE_EXPAND
-    const parts = bottomBorderParts(win.below, cells, label)
+    // ▲▼ only while rows are hidden; a band too narrow for them keeps the toggle.
+    let arrows = !expanded && win.above + win.below > 0
+    let parts = bottomBorderParts(win.below, cells, (arrows ? cellWidth(`${ARROW_UP} ${ARROW_DOWN} ─ `) : 0) + cellWidth(label))
+    if (!parts && arrows) {
+      arrows = false
+      parts = bottomBorderParts(win.below, cells, cellWidth(label))
+    }
     const band = e.requestId
     const { Box, Button, Text } = $.ui.resolve(e)
     return (
@@ -183,6 +201,10 @@ export const register: Register = on => {
         {parts ? (
           <Box flexDirection="row" width={cells}>
             <Text color={BORDER_COLOR}>{parts[0]}</Text>
+            {arrows ? <Button key="up" label={ARROW_UP} plain onPress={() => moveBox($, -SCROLL_STEP)} /> : null}
+            {arrows ? <Text color={BORDER_COLOR}>{' '}</Text> : null}
+            {arrows ? <Button key="down" label={ARROW_DOWN} plain onPress={() => moveBox($, SCROLL_STEP)} /> : null}
+            {arrows ? <Text color={BORDER_COLOR}>{' ─ '}</Text> : null}
             <Button key="toggle" label={label} plain onPress={() => toggle($, band)} />
             <Text color={BORDER_COLOR}>{parts[1]}</Text>
           </Box>
@@ -201,11 +223,7 @@ export const register: Register = on => {
     const box = geometry
     if (!box || box.total <= box.size) return next(e)
     if (e.pointer && (e.pointer.row < 0 || e.pointer.row > box.visible + 1)) return next(e)
-    const last = maxOffset(box.total, box.size)
-    const current = (await read($, followAtom)) ? last : Math.min(await read($, offsetAtom), last)
-    const offset = Math.min(Math.max(0, current + e.by), last)
-    await update($, offsetAtom, () => offset)
-    await update($, followAtom, () => offset === last)
+    await moveBox($, scrollStep(e.by, e.bodyRows, e.contentRows, box.size, box.total))
     return {}
   })
 }

@@ -57,10 +57,11 @@ test('a dropped prompt is taken back off the list', async ($, on) => {
 test('twelve rows show as ten with the hidden count on top', async ($, on) => {
   weather(on); passPrompts(on)
   for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
-  const t = await texts(await mountBand($))
+  const ui = await mountBand($)
+  const t = await texts(ui)
   expect(t[0]).toBe('╭─ 이번 세션 프롬프트 (6) ────────────────── ↑2 ─╮')
   expect(t.filter(x => x === '│ ').length).toBe(10)
-  expect(t.at(-3)).toBe(`╰${'─'.repeat(35)} `)
+  expect((await lines(ui)).at(-2)).toBe(`╰${'─'.repeat(25)} [▲] [▼] ─ [펼치기 ▾] ─╯`)
 })
 
 test('a survey keeps the band to itself', async ($, on) => {
@@ -120,11 +121,11 @@ test('the wheel over the box moves its window and the counts follow', async ($, 
   await wheel($, -1)
   let l = await lines(ui)
   expect(l[0]!.endsWith(' ↑1 ─╮')).toBe(true)
-  expect(l.at(-2)!.endsWith(' ↓1 ─ [펼치기 ▾] ─╯')).toBe(true)
+  expect(l.at(-2)!.endsWith(' ↓1 ─ [▲] [▼] ─ [펼치기 ▾] ─╯')).toBe(true)
   await wheel($, -5)
   l = await lines(ui)
   expect(l[0]).toBe('╭─ 이번 세션 프롬프트 (6) ───────────────────────╮')
-  expect(l.at(-2)!.endsWith(' ↓2 ─ [펼치기 ▾] ─╯')).toBe(true)
+  expect(l.at(-2)!.endsWith(' ↓2 ─ [▲] [▼] ─ [펼치기 ▾] ─╯')).toBe(true)
 })
 
 test('the wheel past the end stays at the end', async ($, on) => {
@@ -134,7 +135,7 @@ test('the wheel past the end stays at the end', async ($, on) => {
   await wheel($, 9)
   const l = await lines(ui)
   expect(l[0]!.endsWith(' ↑2 ─╮')).toBe(true)
-  expect(l.at(-2)).toBe(`╰${'─'.repeat(35)} [펼치기 ▾] ─╯`)
+  expect(l.at(-2)).toBe(`╰${'─'.repeat(25)} [▲] [▼] ─ [펼치기 ▾] ─╯`)
 })
 
 test('a new prompt jumps back to the bottom', async ($, on) => {
@@ -145,7 +146,7 @@ test('a new prompt jumps back to the bottom', async ($, on) => {
   await submit($, 'p7')
   const l = await lines(ui)
   expect(l[0]).toBe('╭─ 이번 세션 프롬프트 (7) ────────────────── ↑4 ─╮')
-  expect(l.at(-2)).toBe(`╰${'─'.repeat(35)} [펼치기 ▾] ─╯`)
+  expect(l.at(-2)).toBe(`╰${'─'.repeat(25)} [▲] [▼] ─ [펼치기 ▾] ─╯`)
 })
 
 test('the wheel over the line beneath goes to the engine', async ($, on) => {
@@ -312,7 +313,7 @@ test('collapsing returns to ten rows that follow the newest', async ($, on) => {
   const l = await lines(ui)
   expect(l[0]!.endsWith(' ↑2 ─╮')).toBe(true)
   expect(l.filter(x => x.startsWith('│ ')).length).toBe(10)
-  expect(l.at(-2)).toBe(`╰${'─'.repeat(35)} [펼치기 ▾] ─╯`)
+  expect(l.at(-2)).toBe(`╰${'─'.repeat(25)} [▲] [▼] ─ [펼치기 ▾] ─╯`)
 })
 
 test('a narrow band keeps a plain bottom border', async ($, on) => {
@@ -357,4 +358,49 @@ test("another plugin's scroll of the band goes to the engine", async ($, on) => 
     origin: { kind: 'plugin', name: 'other' },
   })
   expect(passed).toEqual([5])
+})
+
+test('the arrows move the folded box three rows', async ($, on) => {
+  weather(on); passPrompts(on); passScroll(on)
+  for (let i = 1; i <= 8; i++) await submit($, `p${i}`) // sixteen rows, ten shown from row six
+  const ui = await mountBand($)
+  await ui.press({ key: 'up' })
+  let l = await lines(ui)
+  expect(l[0]!.endsWith(' ↑3 ─╮')).toBe(true)
+  expect(l.at(-2)).toBe(`╰${'─'.repeat(20)} ↓3 ─ [▲] [▼] ─ [펼치기 ▾] ─╯`)
+  await ui.press({ key: 'down' })
+  l = await lines(ui)
+  expect(l[0]!.endsWith(' ↑6 ─╮')).toBe(true)
+  expect(l.at(-2)).toBe(`╰${'─'.repeat(25)} [▲] [▼] ─ [펼치기 ▾] ─╯`)
+})
+
+test('page keys move the folded box a page at a time', async ($, on) => {
+  weather(on); passPrompts(on); passScroll(on)
+  for (let i = 1; i <= 12; i++) await submit($, `p${i}`) // twenty-four rows, ten shown from row fourteen
+  const ui = await mountBand($)
+  const key = (by: number) => $.ui.scroll({
+    component: 'AbovePrompt', requestId: 'band', offset: 0, by, bodyRows: 35, contentRows: 12, origin: { kind: 'person' },
+  })
+  await key(-35)
+  expect((await lines(ui))[0]!.endsWith(' ↑4 ─╮')).toBe(true)
+  await key(-35)
+  expect((await lines(ui))[0]!.includes('↑')).toBe(false)
+  await key(12)
+  expect((await lines(ui))[0]!.endsWith(' ↑14 ─╮')).toBe(true)
+})
+
+test('the arrows show only when rows are hidden', async ($, on) => {
+  weather(on); passPrompts(on)
+  await submit($, 'p1')
+  const ui = await mountBand($)
+  expect(await ui.find({ type: 'Button', key: 'up' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'toggle' })).toBeDefined()
+})
+
+test('a narrow band keeps the toggle and drops the arrows', async ($, on) => {
+  weather(on); passPrompts(on)
+  for (let i = 1; i <= 6; i++) await submit($, `p${i}`)
+  const ui = await mountBand($, { ...PROPS, bodyColumns: 20 })
+  expect(await ui.find({ type: 'Button', key: 'up' })).toBeUndefined()
+  expect(await ui.find({ type: 'Button', key: 'toggle' })).toBeDefined()
 })
