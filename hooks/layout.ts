@@ -1,3 +1,14 @@
+import type { Entry } from '../types'
+
+export const PALETTE: readonly string[] = ['#5fd7ff', '#ff87d7', '#ffd75f', '#87d787', '#af87ff', '#ffaf5f']
+export const BORDER_COLOR = '#6c6c6c'
+export const MAX_BODY_ROWS = 10
+export const PENDING_EMOJI = '⏳'
+export const FALLBACK_EMOJI = '💬'
+
+export type Row = { text: string; color: string; bold: boolean }
+export type BodyWindow = { offset: number; rows: Row[]; above: number; below: number }
+
 // Terminal cells per code point: 0 for combining marks, joiners and variation
 // selectors; 2 for Hangul, CJK, full-width forms and emoji; 1 for the rest.
 type Range = readonly [number, number]
@@ -93,4 +104,67 @@ export function wrapToRows(s: string, cells: number, maxRows: number): string[] 
   const kept = rows.slice(0, maxRows)
   kept[maxRows - 1] = cutToWidth(`${kept[maxRows - 1]} ${rows.slice(maxRows).join(' ')}`, cells)
   return kept
+}
+
+function emojiOf(entry: Entry): string {
+  if (entry.status === 'pending') return PENDING_EMOJI
+  if (entry.status === 'failed') return FALLBACK_EMOJI
+  return entry.emoji ?? FALLBACK_EMOJI
+}
+
+// An entry's rows: emoji, number and the prompt's first row in bold, then the
+// summary under an arrow (a failed one shows the rest of the prompt instead).
+// Every row is painted in the entry's color.
+export function entryRows(entry: Entry, numberWidth: number, innerCells: number): Row[] {
+  const color = PALETTE[(((entry.n - 1) % PALETTE.length) + PALETTE.length) % PALETTE.length]!
+  const prefix = `${emojiOf(entry)} ${String(entry.n).padStart(numberWidth)}  `
+  const indent = ' '.repeat(cellWidth(prefix))
+  const flat = flatten(entry.text)
+  const avail = innerCells - indent.length
+  const subCells = innerCells - indent.length - 2
+  const sub = (text: string): Row => ({ text, color, bold: false })
+  const rows: Row[] = [{ text: prefix + cutToWidth(flat, avail), color, bold: true }]
+  if (entry.status === 'pending') {
+    rows.push(sub(`${indent}→ 요약 중…`))
+  } else if (entry.status === 'done') {
+    wrapToRows(flatten(entry.summary ?? ''), subCells, 2)
+      .forEach((line, i) => rows.push(sub(`${indent}${i === 0 ? '→ ' : '  '}${line}`)))
+  } else if (cellWidth(flat) > avail) {
+    const rest = splitAtWidth(flat, avail - 1)[1].trim()
+    for (const line of wrapToRows(rest, subCells, 2)) rows.push(sub(`${indent}  ${line}`))
+  }
+  return rows
+}
+
+export function maxOffset(total: number, size: number): number {
+  return Math.max(0, total - size)
+}
+
+export function windowRows(rows: Row[], offset: number, size: number): BodyWindow {
+  const start = Math.min(Math.max(0, offset), maxOffset(rows.length, size))
+  const shown = rows.slice(start, start + size)
+  return { offset: start, rows: shown, above: start, below: rows.length - start - shown.length }
+}
+
+// Rows the box body may take: at most MAX_BODY_ROWS, leaving the two border
+// rows and what is drawn beneath; none when fewer than two would fit.
+export function bodySize(maxRows: number, belowRows: number): number {
+  const size = Math.min(MAX_BODY_ROWS, maxRows - 2 - belowRows)
+  return size >= 2 ? size : 0
+}
+
+export function topBorder(title: string, above: number, cells: number): string {
+  if (cells < 2) return ''
+  const tail = above > 0 ? ` ↑${above} ─╮` : '─╮'
+  const shown = cutToWidth(title, cells - 3 - cellWidth(tail) - 1)
+  const left = shown ? `╭─ ${shown} ` : '╭'
+  const fill = cells - cellWidth(left) - cellWidth(tail)
+  return fill < 0 ? `╭${'─'.repeat(cells - 2)}╮` : `${left}${'─'.repeat(fill)}${tail}`
+}
+
+export function bottomBorder(below: number, cells: number): string {
+  if (cells < 2) return ''
+  const tail = below > 0 ? ` ↓${below} ─╯` : '─╯'
+  const fill = cells - 1 - cellWidth(tail)
+  return fill < 0 ? `╰${'─'.repeat(cells - 2)}╯` : `╰${'─'.repeat(fill)}${tail}`
 }
